@@ -4,6 +4,7 @@ Dev server resource monitoring dashboard with per-user fair-share alerts and Tea
 
 <img width="1424" height="1371" alt="image" src="https://github.com/user-attachments/assets/35723669-3b9b-4d7c-8c9e-190f1ebb940b" />
 <img width="436" height="420" alt="image" src="https://github.com/user-attachments/assets/f6df3897-8b55-4f95-bef7-dad973f5b0a8" />
+<img width="502" height="290" alt="image" src="https://github.com/user-attachments/assets/38b8d2ce-028a-4591-8e70-72c94ff87367" />
 
 ## Features
 
