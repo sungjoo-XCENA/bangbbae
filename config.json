@@ -1,7 +1,7 @@
 {
   "port": 8000,
-  "teams_webhook": "https://defaultb6b27f63aa524904bb98c040d01eb7.f9.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/4d216af9801946c580fbe010f15219ff/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=dfsGsfKV75bLWVb3VxwlEXxz8THzeR_D4rd5aEHrpXU",
-  "dashboard_url": "http://192.168.57.17:8000",
+  "teams_webhook": "",
+  "dashboard_url": "",
   "warning_percent": 120,
   "critical_percent": 150,
   "cooldown_minutes": 5,
