@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ServerGuard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+        .bar-bg { background: rgba(255,255,255,0.06); }
+        .pulse { animation: pulse 2s infinite; }
+        @keyframes pulse { 0%,100%{ opacity:1 } 50%{ opacity:0.5 } }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-200 min-h-screen">
+
+<!-- Header -->
+<header class="border-b border-slate-800 px-6 py-4 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+        <span class="text-xl font-bold text-white">ServerGuard</span>
+        <span id="clock" class="text-sm text-slate-500"></span>
+        <span id="status-dot" class="w-2 h-2 rounded-full bg-emerald-500 pulse"></span>
+    </div>
+    <button onclick="openSettings()" class="px-4 py-2 text-sm bg-slate-800 hover:bg-slate-700 rounded-lg transition">
+        Settings
+    </button>
+</header>
+
+<!-- Dashboard -->
+<main class="max-w-5xl mx-auto px-4 py-6 space-y-6">
+
+    <!-- System Summary -->
+    <div id="system-summary" class="grid grid-cols-1 md:grid-cols-3 gap-4"></div>
+
+    <!-- Active Users -->
+    <section id="active-section" class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+        <div class="text-slate-500 text-sm">Loading...</div>
+    </section>
+
+    <!-- Inactive Users -->
+    <section id="inactive-section" class="bg-slate-900 border border-slate-800 rounded-xl p-5 hidden"></section>
+
+    <!-- Top Processes -->
+    <section id="procs-section" class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+        <div class="text-slate-500 text-sm">Loading...</div>
+    </section>
+
+</main>
+
+<!-- Settings Modal -->
+<div id="settings-modal" class="fixed inset-0 bg-black/60 hidden items-center justify-center z-50" onclick="if(event.target===this)closeSettings()">
+    <div class="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-md mx-4 space-y-4">
+        <div class="flex items-center justify-between">
+            <h2 class="text-lg font-semibold text-white">Settings</h2>
+            <button onclick="closeSettings()" class="text-slate-400 hover:text-white text-xl">&times;</button>
+        </div>
+        <div>
+            <label class="block text-sm text-slate-400 mb-1">Teams Webhook URL</label>
+            <input id="s-webhook" type="text" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-500" placeholder="https://xxx.webhook.office.com/...">
+        </div>
+        <div>
+            <label class="block text-sm text-slate-400 mb-1">Dashboard URL (for alert card link)</label>
+            <input id="s-dashboard" type="text" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-500" placeholder="http://10.0.0.5:8000">
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+            <div>
+                <label class="block text-sm text-slate-400 mb-1">Warning Threshold (%)</label>
+                <input id="s-warning" type="number" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-500" placeholder="120">
+            </div>
+            <div>
+                <label class="block text-sm text-slate-400 mb-1">Critical Threshold (%)</label>
+                <input id="s-critical" type="number" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-500" placeholder="150">
+            </div>
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+            <div>
+                <label class="block text-sm text-slate-400 mb-1">Alert Cooldown (min)</label>
+                <input id="s-cooldown" type="number" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-500" placeholder="5">
+            </div>
+            <div>
+                <label class="block text-sm text-slate-400 mb-1">Refresh Interval (sec)</label>
+                <input id="s-refresh" type="number" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-500" placeholder="3">
+            </div>
+        </div>
+        <div>
+            <label class="block text-sm text-slate-400 mb-1">Exclude Users (comma separated)</label>
+            <input id="s-exclude" type="text" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-500" placeholder="guest, test">
+        </div>
+        <div class="flex gap-3 pt-2">
+            <button onclick="testAlert()" id="btn-test" class="flex-1 py-2 text-sm bg-slate-700 hover:bg-slate-600 rounded-lg transition">
+                Send Test Alert
+            </button>
+            <button onclick="saveSettings()" id="btn-save" class="flex-1 py-2 text-sm bg-sky-600 hover:bg-sky-500 rounded-lg transition font-medium">
+                Save
+            </button>
+        </div>
+        <div id="settings-msg" class="text-sm text-center hidden"></div>
+    </div>
+</div>
+
+<script>
+const REFRESH_MS = {{ refresh_interval }} * 1000;
+let timer = null;
+
+// --- Render ---
+
+function barColor(alerts, resource) {
+    if (!alerts) return 'bg-emerald-500';
+    const a = alerts.find(x => x.resource === resource);
+    if (!a) return 'bg-emerald-500';
+    return a.level === 'critical' ? 'bg-rose-500' : 'bg-amber-500';
+}
+
+function badge(alerts, resource) {
+    if (!alerts) return '';
+    const a = alerts.find(x => x.resource === resource);
+    if (!a) return '';
+    if (a.level === 'critical') return '<span class="text-xs text-rose-400 font-medium ml-2">Exceeded</span>';
+    return '<span class="text-xs text-amber-400 font-medium ml-2">Warning</span>';
+}
+
+function gaugeCard(label, pct, detail) {
+    const color = pct > 90 ? 'bg-rose-500' : pct > 70 ? 'bg-amber-500' : 'bg-emerald-500';
+    return `
+    <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+        <div class="flex items-center justify-between mb-2">
+            <span class="text-sm text-slate-400">${label}</span>
+            <span class="text-lg font-bold text-white">${pct}%</span>
+        </div>
+        <div class="bar-bg h-2 rounded-full overflow-hidden">
+            <div class="${color} h-full rounded-full transition-all duration-500" style="width:${Math.min(pct,100)}%"></div>
+        </div>
+        <div class="text-xs text-slate-500 mt-1">${detail}</div>
+    </div>`;
+}
+
+function userBar(label, val, max, unit, color) {
+    const pct = max > 0 ? Math.min(val / max * 100, 100) : 0;
+    const display = unit === '%' ? `${val}%` : `${val}${unit}`;
+    return `
+    <div class="flex items-center gap-2 text-sm">
+        <span class="w-10 text-slate-500 text-xs">${label}</span>
+        <div class="flex-1 bar-bg h-2 rounded-full overflow-hidden">
+            <div class="${color} h-full rounded-full transition-all duration-500" style="width:${pct}%"></div>
+        </div>
+        <span class="w-20 text-right text-xs text-slate-400">${display}</span>
+    </div>`;
+}
+
+function render(data) {
+    const { time, system: s, fair, active, inactive, top_procs } = data;
+
+    document.getElementById('clock').textContent = time;
+
+    // System summary
+    document.getElementById('system-summary').innerHTML =
+        gaugeCard('CPU', s.cpu, `${s.cores} cores`) +
+        gaugeCard('RAM', s.ram_pct, `${s.ram_used}/${s.ram_total}GB`) +
+        gaugeCard('Disk', s.disk_pct, `${s.disk_used}/${s.disk_total}GB`);
+
+    // Active users
+    const as = document.getElementById('active-section');
+    if (active.length === 0) {
+        as.innerHTML = `
+            <h2 class="text-sm font-semibold text-slate-400 mb-3">No Active Users</h2>
+            <div class="text-slate-600 text-sm">No users currently running processes</div>`;
+    } else {
+        let h = `<h2 class="text-sm font-semibold text-slate-400 mb-4">
+            <span class="text-emerald-400">Active</span> ${active.length} users
+            <span class="text-slate-600 font-normal ml-2">Fair share: CPU ${fair.cpu}% / RAM ${fair.ram_gb}GB / Disk ${fair.disk_gb}GB</span>
+        </h2>
+        <div class="space-y-4">`;
+
+        for (const u of active) {
+            const hasAlert = u.alerts && u.alerts.length > 0;
+            const border = hasAlert ? (u.alerts.some(a => a.level==='critical') ? 'border-rose-500/30' : 'border-amber-500/30') : 'border-slate-800';
+            h += `
+            <div class="border ${border} rounded-lg p-4 bg-slate-950/50">
+                <div class="flex items-center justify-between mb-3">
+                    <span class="font-medium text-white">${u.name}</span>
+                    <span class="text-xs text-slate-500">${u.proc_count} processes</span>
+                </div>
+                <div class="space-y-2">
+                    ${userBar('CPU', u.cpu, 100, '%', barColor(u.alerts, 'CPU'))}${badge(u.alerts, 'CPU')}
+                    ${userBar('RAM', u.ram_gb, s.ram_total, 'GB', barColor(u.alerts, 'RAM'))}${badge(u.alerts, 'RAM')}
+                    ${u.disk_gb >= 0 ?
+                        userBar('Disk', u.disk_gb, s.disk_total, 'GB', barColor(u.alerts, 'Disk')) + badge(u.alerts, 'Disk')
+                        : '<div class="text-xs text-slate-600 ml-12">Disk: No permission</div>'}
+                </div>
+            </div>`;
+        }
+        h += '</div>';
+        as.innerHTML = h;
+    }
+
+    // Inactive users
+    const is_ = document.getElementById('inactive-section');
+    if (inactive.length > 0) {
+        is_.classList.remove('hidden');
+        let h = `<h2 class="text-sm font-semibold text-slate-400 mb-3">
+            <span class="text-slate-500">Inactive</span> ${inactive.length} users — No processes
+        </h2>
+        <div class="space-y-2">`;
+
+        for (const u of inactive) {
+            const diskAlert = u.alerts && u.alerts.length > 0;
+            const diskColor = diskAlert ? (u.alerts[0].level === 'critical' ? 'text-rose-400' : 'text-amber-400') : 'text-slate-500';
+            const diskBadge = diskAlert ? (u.alerts[0].level === 'critical' ? ' <span class="text-rose-400">Exceeded</span>' : ' <span class="text-amber-400">Warning</span>') : '';
+            const diskText = u.disk_gb >= 0 ? `${u.disk_gb}GB${diskBadge}` : 'No permission';
+            h += `
+            <div class="flex items-center justify-between py-2 border-b border-slate-800/50 last:border-0">
+                <div class="flex items-center gap-3">
+                    <span class="text-slate-400">${u.name}</span>
+                    <span class="text-xs text-slate-600">Last login: ${u.last_login || 'Unknown'}</span>
+                </div>
+                <span class="text-xs ${diskColor}">Disk: ${diskText}</span>
+            </div>`;
+        }
+        h += '</div>';
+        is_.innerHTML = h;
+    } else {
+        is_.classList.add('hidden');
+    }
+
+    // Top processes
+    const ps = document.getElementById('procs-section');
+    if (top_procs.length === 0) {
+        ps.innerHTML = `<h2 class="text-sm font-semibold text-slate-400">No Processes</h2>`;
+    } else {
+        let h = `<h2 class="text-sm font-semibold text-slate-400 mb-3">Top ${top_procs.length} Processes</h2>
+        <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="text-slate-500 text-xs border-b border-slate-800">
+                    <th class="text-left py-2 font-medium">User</th>
+                    <th class="text-left py-2 font-medium">PID</th>
+                    <th class="text-right py-2 font-medium">CPU</th>
+                    <th class="text-right py-2 font-medium">RAM</th>
+                    <th class="text-left py-2 pl-4 font-medium">Command</th>
+                </tr>
+            </thead>
+            <tbody>`;
+
+        for (const p of top_procs) {
+            const cpuColor = p.cpu > 50 ? 'text-rose-400' : p.cpu > 20 ? 'text-amber-400' : 'text-slate-300';
+            const ramVal = p.ram_mb >= 1024 ? `${(p.ram_mb/1024).toFixed(1)}GB` : `${Math.round(p.ram_mb)}MB`;
+            h += `
+                <tr class="border-b border-slate-800/50 hover:bg-slate-800/30">
+                    <td class="py-2 text-slate-300">${p.user}</td>
+                    <td class="py-2 text-slate-500">${p.pid}</td>
+                    <td class="py-2 text-right ${cpuColor}">${p.cpu}%</td>
+                    <td class="py-2 text-right text-slate-300">${ramVal}</td>
+                    <td class="py-2 pl-4 text-slate-500 truncate max-w-xs">${escHtml(p.cmd)}</td>
+                </tr>`;
+        }
+        h += '</tbody></table></div>';
+        ps.innerHTML = h;
+    }
+}
+
+function escHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+}
+
+// --- Fetch ---
+
+async function fetchSnapshot() {
+    try {
+        const res = await fetch('/api/snapshot');
+        if (!res.ok) throw new Error(res.status);
+        const data = await res.json();
+        render(data);
+        document.getElementById('status-dot').classList.remove('bg-rose-500');
+        document.getElementById('status-dot').classList.add('bg-emerald-500');
+    } catch (e) {
+        document.getElementById('status-dot').classList.remove('bg-emerald-500');
+        document.getElementById('status-dot').classList.add('bg-rose-500');
+    }
+}
+
+function startPolling(ms) {
+    if (timer) clearInterval(timer);
+    timer = setInterval(fetchSnapshot, ms);
+    fetchSnapshot();
+}
+
+startPolling(REFRESH_MS);
+
+// --- Settings ---
+
+async function openSettings() {
+    const modal = document.getElementById('settings-modal');
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+    hideMsg();
+
+    try {
+        const res = await fetch('/api/settings');
+        const c = await res.json();
+        document.getElementById('s-webhook').value = c.teams_webhook || '';
+        document.getElementById('s-dashboard').value = c.dashboard_url || '';
+        document.getElementById('s-warning').value = c.warning_percent || 120;
+        document.getElementById('s-critical').value = c.critical_percent || 150;
+        document.getElementById('s-cooldown').value = c.cooldown_minutes || 5;
+        document.getElementById('s-refresh').value = c.refresh_interval || 3;
+        document.getElementById('s-exclude').value = (c.exclude_users || []).join(', ');
+    } catch {}
+}
+
+function closeSettings() {
+    const modal = document.getElementById('settings-modal');
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+}
+
+function showMsg(text, ok) {
+    const el = document.getElementById('settings-msg');
+    el.textContent = text;
+    el.className = `text-sm text-center ${ok ? 'text-emerald-400' : 'text-rose-400'}`;
+    el.classList.remove('hidden');
+    setTimeout(hideMsg, 3000);
+}
+
+function hideMsg() {
+    document.getElementById('settings-msg').classList.add('hidden');
+}
+
+async function saveSettings() {
+    const exclude = document.getElementById('s-exclude').value
+        .split(',').map(s => s.trim()).filter(Boolean);
+    const refreshVal = parseInt(document.getElementById('s-refresh').value) || 3;
+
+    const body = {
+        teams_webhook: document.getElementById('s-webhook').value.trim(),
+        dashboard_url: document.getElementById('s-dashboard').value.trim(),
+        warning_percent: parseInt(document.getElementById('s-warning').value) || 120,
+        critical_percent: parseInt(document.getElementById('s-critical').value) || 150,
+        cooldown_minutes: parseInt(document.getElementById('s-cooldown').value) || 5,
+        refresh_interval: refreshVal,
+        exclude_users: exclude,
+    };
+
+    try {
+        const res = await fetch('/api/settings', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+        if (res.ok) {
+            showMsg('Saved', true);
+            startPolling(refreshVal * 1000);
+        } else {
+            showMsg('Save failed', false);
+        }
+    } catch {
+        showMsg('Save failed', false);
+    }
+}
+
+async function testAlert() {
+    const btn = document.getElementById('btn-test');
+    btn.textContent = 'Sending...';
+    btn.disabled = true;
+
+    try {
+        const res = await fetch('/api/test-alert', { method: 'POST' });
+        const data = await res.json();
+        if (res.ok) {
+            showMsg('Test alert sent', true);
+        } else {
+            showMsg(data.error || 'Send failed', false);
+        }
+    } catch {
+        showMsg('Send failed', false);
+    } finally {
+        btn.textContent = 'Send Test Alert';
+        btn.disabled = false;
+    }
+}
+</script>
+
+</body>
+</html>

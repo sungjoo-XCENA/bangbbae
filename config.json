@@ -1,0 +1,11 @@
+{
+  "port": 8000,
+  "teams_webhook": "",
+  "dashboard_url": "http://localhost:8000",
+  "warning_percent": 120,
+  "critical_percent": 150,
+  "cooldown_minutes": 5,
+  "exclude_users": [],
+  "top_process_count": 10,
+  "refresh_interval": 3
+}
