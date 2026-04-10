@@ -1,4 +1,4 @@
-"""ServerGuard - Dev server resource monitoring & Teams alerts"""
+"""Bangbbae - Dev server resource monitoring & Teams alerts"""
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -175,7 +175,7 @@ def get_snapshot():
     fair = {
         "n_active": n_active,
         "n_all": n_all,
-        "cpu": round(100 / n_active, 1),
+        "cpu": round(psutil.cpu_count() * 100 / n_active, 1),
         "ram_gb": round(mem.total / (1024 ** 3) / n_active, 1),
         "disk_gb": round(disk.total / (1024 ** 3) / n_all, 1),
     }
@@ -372,7 +372,7 @@ async def api_test_alert():
                 "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
                 "body": [
                     {"type": "TextBlock", "text": "Test Alert", "weight": "Bolder", "size": "Medium"},
-                    {"type": "TextBlock", "text": "ServerGuard Teams integration is working."},
+                    {"type": "TextBlock", "text": "Bangbbae Teams integration is working."},
                     {"type": "FactSet", "facts": [
                         {"title": "Time", "value": datetime.now().strftime("%Y-%m-%d %H:%M:%S")},
                     ]},
@@ -395,6 +395,23 @@ async def api_test_alert():
 
 
 if __name__ == "__main__":
+    import argparse
+    import socket
     import uvicorn
+
+    parser = argparse.ArgumentParser(description="Bangbbae")
+    parser.add_argument("-p", "--port", type=int, default=8000)
+    parser.add_argument("--host", default="0.0.0.0")
+    args = parser.parse_args()
+
+    internal_ip = socket.gethostbyname(socket.gethostname())
+    dashboard_url = f"http://{internal_ip}:{args.port}"
+
     config = load_config()
-    uvicorn.run(app, host="0.0.0.0", port=config.get("port", 8000))
+    config["dashboard_url"] = dashboard_url
+    save_config(config)
+
+    print(f"Serving on http://{args.host}:{args.port}")
+    print(f"→ Internal network: {dashboard_url}")
+
+    uvicorn.run(app, host=args.host, port=args.port)
